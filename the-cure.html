@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Cure - Code Lyric Visualizer</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Fira+Code:ital,wght@0,500;0,700;1,500&display=swap');
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: #050505;
+      color: #e6edf3;
+      font-family: 'Fira Code', monospace;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+    }
+
+    /* Wrapper Kamera untuk Efek Zoom Lebih Dekat */
+    .camera-stage {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      transform: scale(1);
+      transition: transform 0.65s cubic-bezier(0.22, 1, 0.36, 1);
+      will-change: transform;
+    }
+
+    /* Watermark di tengah atas lirik */
+    .watermark {
+      position: fixed;
+      top: 13%;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #636e7b;
+      opacity: 0.45;
+      font-size: clamp(0.85rem, 1.5vw, 1.05rem);
+      letter-spacing: 1.5px;
+      pointer-events: none;
+      user-select: none;
+      text-shadow: 0 0 8px rgba(99, 110, 123, 0.25);
+    }
+
+    .editor-container {
+      width: 88%;
+      max-width: 920px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .line {
+      font-size: clamp(1rem, 2.2vw, 1.65rem);
+      line-height: 1.55;
+      white-space: pre-wrap;
+      text-shadow: 0 0 10px rgba(255, 255, 255, 0.12);
+      transform-origin: left center;
+      transform: scale(0.96);
+      transition: opacity 0.7s ease, transform 0.55s cubic-bezier(0.22, 1, 0.36, 1), filter 0.7s ease;
+    }
+
+    .line.active {
+      transform: scale(1.05);
+      opacity: 1;
+    }
+
+    .line.faded {
+      opacity: 0.14;
+      transform: translateY(-10px) scale(0.95);
+      filter: blur(0.6px);
+    }
+
+    /* Animasi tiap huruf yang berterbangan masuk lalu menyatu rapi */
+    .fly-char {
+      display: inline-block;
+      opacity: 0;
+      filter: blur(5px);
+      transform: translate(var(--rx, 0px), var(--ry, 0px)) rotate(var(--rrot, 0deg)) scale(1.65);
+      transition: transform 0.48s cubic-bezier(0.16, 1, 0.3, 1),
+                  opacity 0.32s ease,
+                  filter 0.38s ease;
+      will-change: transform, opacity, filter;
+    }
+
+    .fly-char.settled {
+      opacity: 1;
+      filter: blur(0px);
+      transform: translate(0px, 0px) rotate(0deg) scale(1);
+    }
+
+    /* Warna Syntax Highlighting */
+    .kw-pink { color: #ff5572; font-weight: 700; text-shadow: 0 0 12px rgba(255, 85, 114, 0.35); }
+    .method-purple { color: #c792ea; text-shadow: 0 0 12px rgba(199, 146, 234, 0.3); }
+    .str-green { color: #a6e22e; text-shadow: 0 0 12px rgba(166, 226, 46, 0.25); }
+    .prop-blue { color: #66d9ef; font-style: italic; text-shadow: 0 0 12px rgba(102, 217, 239, 0.3); }
+    .comment-gray { color: #636e7b; font-style: italic; }
+    .punc-gray { color: #d4d4d4; }
+
+    /* Kursor Kotak Merah */
+    .cursor {
+      display: inline-block;
+      width: 0.58em;
+      height: 1.15em;
+      background-color: #e03131;
+      box-shadow: 0 0 10px rgba(224, 49, 49, 0.8);
+      vertical-align: text-bottom;
+      margin-left: 3px;
+      border-radius: 2px;
+      animation: blink 0.75s step-end infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+
+    /* Panel Kontrol Bawah */
+    .controls {
+      position: fixed;
+      bottom: 24px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      background: #11141a;
+      border: 1px solid #262b36;
+      padding: 10px 16px;
+      border-radius: 8px;
+      transition: opacity 0.4s ease;
+      z-index: 10;
+    }
+
+    .controls.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    button, .file-label {
+      background: #1c212b;
+      color: #66d9ef;
+      border: 1px solid #30363d;
+      padding: 8px 14px;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.85rem;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    button:hover, .file-label:hover {
+      border-color: #66d9ef;
+      background: #252c38;
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    #timer-display {
+      color: #a6e22e;
+      font-size: 0.9rem;
+      min-width: 70px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Panggung Kamera dengan Zoom Lebih Dekat -->
+  <div class="camera-stage" id="camera">
+    <div class="watermark">by : @ijull</div>
+    <div class="editor-container" id="container"></div>
+  </div>
+
+  <div class="controls" id="controls">
+    <label class="file-label">
+      📁 Pilih MP3
+      <input type="file" id="audio-upload" accept="audio/*">
+    </label>
+    <button id="play-btn">▶ Play & Hide UI</button>
+    <button id="sync-btn">⏱ Mode Tap Sync (Spasi)</button>
+    <span id="timer-display">0.00s</span>
+  </div>
+
+  <audio id="audio"></audio>
+
+  <script>
+    // Zoom sudah ditingkatkan lebih dekat (1.12 di Bridge -> sampai 1.28 di Chorus)
+    const lyrics = [
+      // [Bridge]
+      {
+        time: 1.00, speed: 52, zoom: 1.12,
+        tokens: [
+          { text: "why", cls: "kw-pink" }, { text: ".", cls: "punc-gray" },
+          { text: "cant_you", cls: "method-purple" }, { text: "( ", cls: "punc-gray" },
+          { text: '"come_stitch_me_up?"', cls: "str-green" }, { text: " ); ", cls: "punc-gray" },
+        ]
+      },
+      {
+        time: 4.50, speed: 52, zoom: 1.15,
+        tokens: [
+          { text: "why", cls: "kw-pink" }, { text: ".", cls: "punc-gray" },
+          { text: "cant_it", cls: "method-purple" }, { text: "( ", cls: "punc-gray" },
+          { text: '"ever_be_enough?"', cls: "str-green" }, { text: " ); ", cls: "punc-gray" },
+        ]
+      },
+      {
+        time: 8.00, speed: 52, zoom: 1.18,
+        tokens: [
+          { text: "why", cls: "kw-pink" }, { text: ".", cls: "punc-gray" },
+          { text: "cant_you", cls: "method-purple" }, { text: "( ", cls: "punc-gray" },
+          { text: '"come_stitch_me_up?"', cls: "str-green" }, { text: " ); ", cls: "punc-gray" },
+        ]
+      },
+      {
+        time: 11.50, speed: 62, zoom: 1.21,
+        tokens: [
+          { text: "why", cls: "kw-pink" }, { text: ".", cls: "punc-gray" },
+          { text: "cant_it", cls: "method-purple" }, { text: "( ", cls: "punc-gray" },
+          { text: '"ever_be_enoughhhhhh......?"', cls: "str-green" }, { text: " ); ", cls: "punc-gray" },
+        ]
+      },
+      // It's not enough
+      {
+        time: 15.00, speed: 68, zoom: 1.10,
+        tokens: [
+          { text: "its", cls: "kw-pink" }, { text: ".", cls: "punc-gray" },
+          { text: "not", cls: "method-purple" }, { text: "( ", cls: "punc-gray" },
+          { text: '"enoughhhhh......"', cls: "str-green" }, { text: " );", cls: "punc-gray" }
+        ]
+      },
+      // [Chorus] - Zoom lebih dekat & dramatis
+      {
+        time: 18.00, speed: 48, zoom: 1.24,
+        tokens: [
+          { text: "oh", cls: "kw-pink" }, { text: ".", cls: "punc-gray" },
+          { text: "because", cls: "method-purple" }, { text: "( ", cls: "punc-gray" },
+          { text: '"my_head"', cls: "str-green" }, { text: " ){ ", cls: "punc-gray" },
+          { text: "is_full_of", cls: "prop-blue" }, { text: ": ", cls: "punc-gray" },
+          { text: '"poison"', cls: "str-green" }, { text: " };", cls: "punc-gray" }
+        ]
+      },
+      {
+        time: 20.50, speed: 48, zoom: 1.27,
+        tokens: [
+          { text: "and", cls: "kw-pink" }, { text: "( ", cls: "punc-gray" },
+          { text: '"my_heart"', cls: "str-green" }, { text: " ){ ", cls: "punc-gray" },
+          { text: "is_full_of", cls: "prop-blue" }, { text: ": ", cls: "punc-gray" },
+          { text: '"doubt"', cls: "str-green" }, { text: " }; ", cls: "punc-gray" },
+        ]
+      },
+      {
+        time: 23.00, speed: 48, zoom: 1.24,
+        tokens: [
+          { text: "i", cls: "kw-pink" }, { text: ".", cls: "punc-gray" },
+          { text: "got", cls: "method-purple" }, { text: "( ", cls: "punc-gray" },
+          { text: '"toxins"', cls: "str-green" }, { text: " ){ ", cls: "punc-gray" },
+          { text: "in", cls: "prop-blue" }, { text: ": ", cls: "punc-gray" },
+          { text: '"my_bloodstream"', cls: "str-green" }, { text: " };", cls: "punc-gray" }
+        ]
+      },
+      {
+        time: 25.50, speed: 48, zoom: 1.27,
+        tokens: [
+          { text: "you", cls: "kw-pink" }, { text: ".", cls: "punc-gray" },
+          { text: "tried_so_hard", cls: "method-purple" }, { text: "( ", cls: "punc-gray" },
+          { text: '"to_suck_out"', cls: "str-green" }, { text: " ); ", cls: "punc-gray" },
+        ]
+      },
+      {
+        time: 28.00, speed: 48, zoom: 1.24,
+        tokens: [
+          { text: "and", cls: "kw-pink" }, { text: ".", cls: "punc-gray" },
+          { text: "it_feels_like", cls: "method-purple" }, { text: "( ", cls: "punc-gray" },
+          { text: '"medication"', cls: "str-green" }, { text: " );", cls: "punc-gray" }
+        ]
+      },
+      {
+        time: 30.50, speed: 48, zoom: 1.28,
+        tokens: [
+          { text: "and", cls: "kw-pink" }, { text: ".", cls: "punc-gray" },
+          { text: "its_good", cls: "method-purple" }, { text: "( ", cls: "punc-gray" },
+          { text: '"for_me"', cls: "str-green" }, { text: " ){ ", cls: "punc-gray" },
+          { text: "im", cls: "prop-blue" }, { text: ": ", cls: "punc-gray" },
+          { text: '"sure"', cls: "str-green" }, { text: " }; ", cls: "punc-gray" },
+        ]
+      },
+      {
+        time: 33.00, speed: 48, zoom: 1.26,
+        tokens: [
+          { text: "but", cls: "kw-pink" }, { text: ".", cls: "punc-gray" },
+          { text: "it_dont_matter", cls: "method-purple" }, { text: "( ", cls: "punc-gray" },
+          { text: '"how_your_love_feels"', cls: "str-green" }, { text: " ){ ", cls: "punc-gray" },
+          { text: "status", cls: "prop-blue" }, { text: ": ", cls: "punc-gray" },
+          { text: '"anymore"', cls: "str-green" }, { text: " }; ", cls: "punc-gray" },
+        ]
+      },
+      // Penutup
+      {
+        time: 37.50, speed: 60, zoom: 1.18,
+        tokens: [
+          { text: "itll", cls: "kw-pink" }, { text: ".", cls: "punc-gray" },
+          { text: "never_be", cls: "method-purple" }, { text: "( ", cls: "punc-gray" },
+          { text: '"the_cure"', cls: "str-green" }, { text: " );", cls: "punc-gray" }
+        ]
+      },
+      {
+        time: 40.50, speed: 60, zoom: 1.12,
+        tokens: [
+          { text: "it", cls: "kw-pink" }, { text: ".", cls: "punc-gray" },
+          { text: "will_never_be", cls: "method-purple" }, { text: "( ", cls: "punc-gray" },
+          { text: '"the_cure"', cls: "str-green" }, { text: " );", cls: "punc-gray" }
+        ]
+      },
+      {
+        time: 43.50, speed: 75, zoom: 1.06,
+        tokens: [
+          { text: "itll", cls: "kw-pink" }, { text: ".", cls: "punc-gray" },
+          { text: "never_be", cls: "method-purple" }, { text: "( ", cls: "punc-gray" },
+          { text: '"..."', cls: "str-green" }
+        ]
+      }
+    ];
+
+    const audio = document.getElementById("audio");
+    const camera = document.getElementById("camera");
+    const container = document.getElementById("container");
+    const controls = document.getElementById("controls");
+    const uploadInput = document.getElementById("audio-upload");
+    const playBtn = document.getElementById("play-btn");
+    const syncBtn = document.getElementById("sync-btn");
+    const timerDisplay = document.getElementById("timer-display");
+
+    const cursor = document.createElement("span");
+    cursor.className = "cursor";
+
+    // Kumpulan simbol/huruf acak sementara sebelum huruf asli menyatu rapi
+    const randomGlyphs = "abcdefghijklmnopqrstuvwxyz0123456789@#$%&*<>/{}[]";
+
+    let currentIndex = 0;
+    let activeTypingId = 0;
+    let isTapSyncMode = false;
+    let recordedTimes = [];
+    let zoomTimeout = null;
+
+    uploadInput.addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        audio.src = URL.createObjectURL(file);
+        resetLyrics();
+      }
+    });
+
+    function resetLyrics() {
+      currentIndex = 0;
+      activeTypingId++;
+      container.innerHTML = "";
+      camera.style.transform = "scale(1)";
+    }
+
+    function triggerBeatZoom(targetZoom = 1.15) {
+      clearTimeout(zoomTimeout);
+      const punchScale = targetZoom + 0.05;
+      camera.style.transition = "transform 0.22s cubic-bezier(0.16, 1, 0.3, 1)";
+      camera.style.transform = `scale(${punchScale})`;
+
+      zoomTimeout = setTimeout(() => {
+        camera.style.transition = "transform 1.4s cubic-bezier(0.22, 1, 0.36, 1)";
+        camera.style.transform = `scale(${targetZoom})`;
+      }, 220);
+    }
+
+    // Membuat huruf muncul dari posisi acak berterbangan + acak karakter lalu terkunci rapi
+    function createFlyingChar(targetChar) {
+      if (targetChar === " ") {
+        return document.createTextNode(" ");
+      }
+
+      const charEl = document.createElement("span");
+      charEl.className = "fly-char";
+
+      // Arah terbang acak dari sekitar layar (-130px s/d +130px X, -85px s/d +85px Y)
+      const rx = (Math.random() - 0.5) * 260;
+      const ry = (Math.random() - 0.5) * 170;
+      const rrot = (Math.random() - 0.5) * 90;
+
+      charEl.style.setProperty("--rx", `${rx.toFixed(0)}px`);
+      charEl.style.setProperty("--ry", `${ry.toFixed(0)}px`);
+      charEl.style.setProperty("--rrot", `${rrot.toFixed(0)}deg`);
+
+      // Mulai dengan karakter acak sebelum berubah ke huruf asli
+      charEl.textContent = randomGlyphs[Math.floor(Math.random() * randomGlyphs.length)];
+
+      // Acak 2 kali saat sedang melayang menuju posisi aslinya
+      setTimeout(() => {
+        charEl.textContent = randomGlyphs[Math.floor(Math.random() * randomGlyphs.length)];
+      }, 80);
+
+      setTimeout(() => {
+        charEl.textContent = targetChar;
+      }, 170);
+
+      // Picu transisi CSS meluncur menyatu ke posisi teratur
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          charEl.classList.add("settled");
+        });
+      });
+
+      return charEl;
+    }
+
+    async function renderLine(lineObj) {
+      const typingId = ++activeTypingId;
+
+      triggerBeatZoom(lineObj.zoom || 1.15);
+
+      const prevLines = container.querySelectorAll(".line");
+      prevLines.forEach(el => {
+        el.classList.remove("active");
+        el.classList.add("faded");
+      });
+      if (prevLines.length >= 3) {
+        prevLines[0].remove();
+      }
+
+      const lineEl = document.createElement("div");
+      lineEl.className = "line active";
+      container.appendChild(lineEl);
+      lineEl.appendChild(cursor);
+
+      for (const token of lineObj.tokens) {
+        const span = document.createElement("span");
+        span.className = token.cls;
+        lineEl.insertBefore(span, cursor);
+
+        for (const char of token.text) {
+          // Jika user cepat pindah baris berikutnya, langsung tampilkan sisa teks rapi
+          if (typingId !== activeTypingId) {
+            span.textContent = token.text;
+            break;
+          }
+          span.appendChild(createFlyingChar(char));
+          await new Promise(r => setTimeout(r, lineObj.speed));
+        }
+      }
+    }
+
+    audio.addEventListener("timeupdate", () => {
+      const now = audio.currentTime;
+      timerDisplay.textContent = now.toFixed(2) + "s";
+
+      if (!isTapSyncMode && currentIndex < lyrics.length && now >= lyrics[currentIndex].time) {
+        renderLine(lyrics[currentIndex]);
+        currentIndex++;
+      }
+    });
+
+    playBtn.addEventListener("click", () => {
+      if (!audio.src) return alert("Pilih file MP3 dulu ya!");
+      isTapSyncMode = false;
+      resetLyrics();
+      audio.currentTime = 0;
+      audio.play();
+      controls.classList.add("hidden");
+    });
+
+    syncBtn.addEventListener("click", () => {
+      if (!audio.src) return alert("Pilih file MP3 dulu ya!");
+      isTapSyncMode = true;
+      recordedTimes = [];
+      resetLyrics();
+      audio.currentTime = 0;
+      audio.play();
+      controls.classList.add("hidden");
+    });
+
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "Space" && isTapSyncMode && !audio.paused) {
+        e.preventDefault();
+        if (currentIndex < lyrics.length) {
+          const t = Number(audio.currentTime.toFixed(2));
+          recordedTimes.push(t);
+          renderLine(lyrics[currentIndex]);
+          currentIndex++;
+
+          if (currentIndex === lyrics.length) {
+            console.log("=== DAFTAR DETIK HASIL TAP SYNC ===");
+            recordedTimes.forEach((time, idx) => {
+              console.log(`Baris ke-${idx + 1}: time: ${time},`);
+            });
+          }
+        }
+      }
+    });
+
+    document.body.addEventListener("dblclick", () => {
+      controls.classList.remove("hidden");
+    });
+    audio.addEventListener("ended", () => {
+      controls.classList.remove("hidden");
+      camera.style.transform = "scale(1)";
+    });
+  </script>
+</body>
+</html>
